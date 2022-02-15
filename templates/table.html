@@ -1,0 +1,7 @@
+{% extends 'index.html' %}
+
+{% block body %}
+    {% for file in files %}
+        <li><a href="{{ url_for('log', filename=file) }}">{{ file }}</a></li>
+    {% endfor %}
+{% endblock %}
