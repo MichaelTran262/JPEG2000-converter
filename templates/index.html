@@ -31,10 +31,10 @@
     <h1>JPEG2000 konvertor</h1>
     <div class="row">
         <div class="col-sm-6">
-            <form class="justify-content-center" action="{{ url_for('handle_form') }}" enctype="multipart/form-data" method="post">
+            <form class="justify-content-center" action="{{ url_for('handle_upload') }}" enctype="multipart/form-data" method="post">
                 {{ dropzone.create() }}
                 <div class="form-group">
-                    <label for="title" style="margin-left:10px">Název obrázku</label>
+                    <label for="title" style="margin-left:10px">Název archivu</label>
                     <input type="text" class="form-control col-sm-6" id="title" name="title" style="margin-left:10px">
                 </div>
                     <input type="submit" id="submit" value="potvrdit a zkonvertovat" style="margin-left:10px">
@@ -43,7 +43,7 @@
             {{ dropzone.config(custom_options='
                 addRemoveLinks: true, 
                 createImageThumbnails: false,
-                dictDefaultMessage: "Nahrejte nebo přitáhněte obrázek sem"'
+                dictDefaultMessage: "Nahrajte nebo přitáhněte obrázek sem"'
             ) }}
         </div>
         <div class="col-sm-6">
@@ -52,15 +52,15 @@
                 <tr>
                     <th scope="col">Název</th>
                     <th scope="col">Akce</th>
-                    <th class="border-left"scope="col">Čas vytvoření</th>
+                    <th class="border-left" scope="col">Čas vytvoření</th>
                 </tr>
                 </thead>
                 <tbody>
                 {% for file in files %}
                     <tr>
-                        <td>{{ file }}</th>
+                        <td>{{ file.name }}.zip</th>
                         <td>
-                            <a href="{{ url_for('log', filename=file) }}">
+                            <a href="{{ url_for('log', filename=file.name) }}">
                                 <button class="btn btn-primary"><i class="fa fa-download"></i></button>
                             </a>
                             <button class="btn btn-danger"><i class="fa fa-times"></i></button>
