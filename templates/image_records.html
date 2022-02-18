@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+
+{% block body %}
+  <div class="container pt-3">
+    <h2>Záznamy vložených obrázků</h2>         
+        <table class="table table-bordered">
+        <thead>
+            <tr>
+                <th>id</th>
+                <th>Název</th>
+                <th>Velikost ( MB )</th>
+                <th>Zdroje ( Paměť:čas(s) )</th>
+                <th>Exit kód</th>
+                <th>Program</th>
+                <th>id Archivu</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for image in images.items %}
+                <tr>
+                    <td>{{ image.id }}</td>
+                    <td>{{ image.name }}</td>
+                    <th>{{ image.imsize }}</th>
+                    <td>{{ image.resources }}</td>
+                    <td>{{ image.exit_code }}</td>
+                    <td>{{ image.command }}</td>
+                    <td>{{ image.batch_id }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+        </table>
+    
+  <!-- Pagination Links-->
+    <div class="text-right">
+        <a href="{{ url_for('image_records', page=images.prev_num) }}" class="btn btn-outline-dark {% if images.page == 1 %}disabled{% endif %}">
+            &laquo;
+        </a>
+        <!-- Loop through the number of pages to display a link for each-->
+        {% for page_num in images.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=2) %}
+        
+        {% if page_num %}
+         <!-- Check for the active page and set the link to "Active"-->
+                {% if images.page == page_num %}
+                <a href="{{ url_for('image_records', page=page_num) }}"
+                class="btn btn-dark">
+                    {{ page_num }}
+                </a>
+                {% else %}
+                <a href="{{ url_for('image_records', page=page_num) }}"
+                class="btn btn-outline-dark">
+                    {{ page_num }}
+                </a>
+                {% endif %}
+            {% else %}
+                ...
+            {% endif %}
+        {% endfor %}    
+        <a href="{{ url_for('image_records', page=images.next_num) }}" class="btn btn-outline-dark {% if images.page == images.pages %}disabled{% endif %}">
+            &raquo;
+        </a>
+    </div>
+    <p class="text-right mt-3">
+        Stránka {{ images.page }} z {{ images.pages }}
+    </p>
+</div>
+{% endblock %}

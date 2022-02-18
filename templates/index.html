@@ -1,53 +1,89 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" type= "text/css" href= "{{ url_for('static',filename='css/main.css') }}">
-     <!-- Latest compiled and minified CSS -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.1/dist/css/bootstrap.min.css">
+{% extends 'base.html' %}
 
-    <!-- jQuery library -->
-    <script src="https://cdn.jsdelivr.net/npm/jquery@3.5.1/dist/jquery.slim.min.js"></script>
-
-    <!-- Popper JS -->
-    <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
-
-    <!-- Latest compiled JavaScript -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.1/dist/js/bootstrap.bundle.min.js"></script> 
-
-    <!-- Font awesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
-
-    <title>Image converter</title>
-
-    {{ dropzone.load_css() }}
-    {{ dropzone.style(
-        'border: 2px dashed #000000; margin: 10px 10px 10px 10px; min-height: 400px;'
-    ) }}
-</head>
-<body>
-    <h1>JPEG2000 konvertor</h1>
-    <div class="row">
+{% block body %}
+    <div class="row p-3">
         <div class="col-sm-6">
-            <form class="justify-content-center" action="{{ url_for('handle_upload') }}" enctype="multipart/form-data" method="post">
-                {{ dropzone.create() }}
+            <form id="main_form">
                 <div class="form-group">
-                    <label for="title" style="margin-left:10px">Název archivu</label>
-                    <input type="text" class="form-control col-sm-6" id="title" name="title" style="margin-left:10px">
+                    <div class="dropzone" id="my-dropzone" name="mainFileUploader">
+                        <div class="fallback">
+                            <input name="file" type="file" multiple />
+                        </div>
+                    </div>
                 </div>
-                    <input type="submit" id="submit" value="potvrdit a zkonvertovat" style="margin-left:10px">
+                <div class="form-group">
+                    <label for="title">Název archivu</label>
+                    <input type="text" class="form-control" id="title" name="title">
+                </div>
+                <div class="form-group">
+                    <label for="sel1">Formát:</label>
+                    <select class="form-control" id="sel_format" name="sel_list">
+                        <option value="png">PNG</option>
+                        <option value="tif">TIFF</option>
+                    </select>
+                </div>
             </form>
-            {{ dropzone.load_js() }}
-            {{ dropzone.config(custom_options='
-                addRemoveLinks: true, 
-                createImageThumbnails: false,
-                dictDefaultMessage: "Nahrajte nebo přitáhněte obrázek sem"'
-            ) }}
+            <div>
+                <button type="submit" id="submit-all" class="btn btn-primary">Zkonvertovat a zabalit</button>
+            </div>
         </div>
+        <script>
+            Dropzone.options.myDropzone = {
+                url: '/upload',
+                autoProcessQueue: false,
+                maxFilesize: 2048,
+                createImageThumbnails: false,
+                uploadMultiple: true,
+                parallelUploads: 100,
+                maxFiles: 30,
+                acceptedFiles: '.jp2',
+                //addRemoveLinks: true,
+                dictDefaultMessage: 'Nahrajte nebo přetáhněte soubory tady<br> <p class="text-muted">Max 2GB pro jeden soubor</p>',
+    
+                init: function () {
+    
+                    var submitButton = document.querySelector("#submit-all");
+                    var wrapperThis = this;
+    
+                    submitButton.addEventListener("click", function () {
+                        wrapperThis.processQueue();
+                    });
+    
+                    this.on("addedfile", function (file) {
+    
+                        // Create the remove button
+                        var removeButton = Dropzone.createElement("<button class='btn btn-link btn-sm'>Odstranit</button>");
+    
+                        // Listen to the click event
+                        removeButton.addEventListener("click", function (e) {
+                            // Make sure the button click doesn't submit the form:
+                            e.preventDefault();
+                            e.stopPropagation();
+    
+                            // Remove the file preview.
+                            wrapperThis.removeFile(file);
+                            // If you want to the delete the file on the server as well,
+                            // you can do the AJAX request here.
+                        });
+    
+                        // Add the button to the file preview element.
+                        file.previewElement.appendChild(removeButton);
+                    });
+    
+                    this.on('sendingmultiple', function (data, xhr, formData) {
+                        formData.append("title", $("#title").val());
+                    });
+                    this.on("successmultiple", function(files, response) {
+                        $('.dz-preview').empty();
+                    });
+                    this.on("errormultiple", function(files, response) {
+
+                    });
+                }
+            };
+        </script>
         <div class="col-sm-6">
-            <table class="table table-striped">
+            <table class="table table-striped table-bordered">
                 <thead>
                 <tr>
                     <th scope="col">Název</th>
@@ -56,22 +92,68 @@
                 </tr>
                 </thead>
                 <tbody>
-                {% for file in files %}
+                {% for archive in archives.items %}
                     <tr>
-                        <td>{{ file.name }}.zip</th>
                         <td>
-                            <a href="{{ url_for('log', filename=file.name) }}">
-                                <button class="btn btn-primary"><i class="fa fa-download"></i></button>
+                            {{ archive.name }}{% if archive.state == 'waiting' %}
+                            <a href="#" data-toggle="tooltip" data-placement="top" title="Archiv se zpracovává a je ve stavu čekající" style="margin-left: 10px;">
+                                <i class="fa fa-info-circle" aria-hidden="true"></i>
                             </a>
-                            <button class="btn btn-danger"><i class="fa fa-times"></i></button>
+                            <div class="spinner-border spinner-border-sm" style="margin-left: 10px;"></div>
+                            {% endif %}
+                        </th>
+                        <td>
+                            {% if archive.state == 'exists' %}
+                                <a href="{{ url_for('log', filename=archive.name) }}">
+                                    <button class="btn btn-primary"><i class="fa fa-download"></i></button>
+                                </a>
+                            {% elif archive.state == 'waiting' %}
+                                <script>
+                                    $(document).ready(function(){
+                                        $('[data-toggle="tooltip"]').tooltip();   
+                                    });
+                                </script>
+                            {% endif %}
+                            <a href="/delete/{{ archive.id }}">
+                                <button class="btn btn-danger"><i class="fa fa-times"></i></button>
+                            </a>
                         </td>
-                        <td class="border-left">unknown</td>
+                        <td class="border-left">{{ archive.date_created.strftime('%d.%m.%Y, %H:%M') }}</td>
                     </tr>
                 {% endfor %}
                 </tbody>
             </table>
+            <div class="text-right">
+                <a href="{{ url_for('index', page=archives.prev_num) }}" class="btn btn-outline-dark {% if archives.page == 1 %}disabled{% endif %}">
+                    &laquo;
+                </a>
+                <!-- Loop through the number of pages to display a link for each-->
+                {% for page_num in archives.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=2) %}
+                
+                {% if page_num %}
+                 <!-- Check for the active page and set the link to "Active"-->
+                        {% if archives.page == page_num %}
+                        <a href="{{ url_for('index', page=page_num) }}"
+                        class="btn btn-dark">
+                            {{ page_num }}
+                        </a>
+                        {% else %}
+                        <a href="{{ url_for('index', page=page_num) }}"
+                        class="btn btn-outline-dark">
+                            {{ page_num }}
+                        </a>
+                        {% endif %}
+                    {% else %}
+                        ...
+                    {% endif %}
+                {% endfor %}    
+                <a href="{{ url_for('index', page=archives.next_num) }}" class="btn btn-outline-dark {% if archives.page == archives.pages %}disabled{% endif %}">
+                    &raquo;
+                </a>
+              </div>
+              <p class="text-right mt-3">
+                  Stránka {{ archives.page }} z {{ archives.pages }}
+              </p>
         </div>
-        <div class="col-sm-2"></div>
       </div>
-</body>
-</html>
+{% endblock %}

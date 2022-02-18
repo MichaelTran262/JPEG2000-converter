@@ -1,11 +1,12 @@
+import sys
 import os
 import zipfile
 
-from flask import Flask, request, render_template, send_from_directory
+from subprocess import check_output, CalledProcessError, STDOUT
+from flask import Flask, request, render_template, send_from_directory, redirect
 from flask_sqlalchemy import SQLAlchemy
-from flask_dropzone import Dropzone
-
 from datetime import datetime
+
 
 basedir = os.path.abspath(os.path.dirname(__file__))
 
@@ -14,85 +15,116 @@ app.config.update(
     SQLALCHEMY_DATABASE_URI = 'postgresql://postgres:postgres@db:5432/image_database',
     UPLOADED_PATH=os.path.join(basedir, 'tmp/jp2/'),
     CONVERTED_PATH=os.path.join(basedir, 'tmp/converted/'),
-    # Flask-Dropzone config:
-    DROPZONE_ALLOWED_FILE_CUSTOM=True,
-    DROPZONE_ALLOWED_FILE_TYPE='.jp2',
-    DROPZONE_MAX_FILE_SIZE=2048,  # set max size limit to a large number, here is 1024 MB
-    DROPZONE_MAX_FILES=30,
-    DROPZONE_IN_FORM=True,
-    DROPZONE_UPLOAD_ON_CLICK=True,
-    DROPZONE_UPLOAD_ACTION='handle_upload',  # URL or endpoint
-    DROPZONE_UPLOAD_BTN_ID='submit',
 )
 db = SQLAlchemy(app)
-dropzone = Dropzone(app)
+
+ROWS_PER_PAGE = 8
+
 
 class Batch(db.Model):
     __tablename__ = "batch"
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(64), nullable=False)
-    path = db.Column(db.String(64), nullable=False)
+    path = db.Column(db.String(64), nullable=True)
     date_created = db.Column(db.DateTime, default=datetime.utcnow)
+    state = db.Column('state', db.Enum('waiting', 'exists', 'removed', 'failed', name='state'), nullable=False)
     children = db.relationship("Image")
 
 class Image(db.Model):
     __tablename__ = "image"
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(64), nullable=False)
-    size = db.Column(db.Integer, nullable=True)
+    exit_code = db.Column(db.Integer, nullable=False)
+    imsize = db.Column(db.Integer, nullable=True)
+    resources = db.Column(db.String(32), nullable=True)
+    command = db.Column('command', db.Enum('vips', 'openjpeg', name='command'), nullable=True)
     batch_id = db.Column(db.Integer, db.ForeignKey('batch.id'))
     
     
 @app.route('/', methods=['POST', 'GET'])
 def index():
     if request.method == 'POST':
-        #shutil.make_archive('batch/' + title, 'zip', os.path.join(basedir, 'tmp2'))
-        archives = Batch.query.order_by(Batch.date_created).all()
-        return render_template('index.html', files=archives)
+        page = request.args.get('page', 1, type=int)
+        archives = Batch.query.order_by(db.desc(Batch.date_created)).filter((Batch.state == 'exists') | (Batch.state == 'waiting')).paginate(page=page, per_page=ROWS_PER_PAGE)
+        return render_template('index.html', archives=archives)
     else:    
-        #archives = os.listdir('batch/')
-        archives = Batch.query.order_by(Batch.date_created).all()
-        return render_template('index.html', files=archives)
+        page = request.args.get('page', 1, type=int)
+        archives = Batch.query.order_by(db.desc(Batch.date_created)).filter((Batch.state == 'exists') | (Batch.state == 'waiting')).paginate(page=page, per_page=ROWS_PER_PAGE)
+        return render_template('index.html', archives=archives)
 
 
 @app.route('/upload', methods=['POST'])
 def handle_upload():
     if request.method == 'POST':
+        #check if archive name exists
+        title = request.form.get('title')
+        zip_name = title+'.zip'
+        exists = Batch.query.filter((Batch.name==zip_name) & (Batch.state=='exists')).scalar()
+        if exists:
+            return 'Tento název už existuje!', 500
+        zip_path = os.path.join(basedir, 'batch/'+zip_name)
+        new_zip = Batch(name=zip_name, path=zip_path, state='waiting')
+        zipf = zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED)
+        try:
+            db.session.add(new_zip)
+            db.session.flush()
+            current_batch_id = new_zip.id
+            db.session.commit()
+        except:
+            return 'Error during db insertion', 500
+        # get files from dropzone and convert them to tif/png
         for key, f in request.files.items():
             if key.startswith('file'):
                 f.save(os.path.join(app.config['UPLOADED_PATH'], f.filename))
                 from_file = os.path.join(app.config['UPLOADED_PATH'], f.filename)
+                jp2_size = os.path.getsize(from_file)/1000000
                 filename = os.path.splitext(f.filename)[0]
                 to_file = os.path.join(basedir, 'tmp') + '/converted/' + filename + '.tif'
                 try:
-                    if os.system('vips copy ' + from_file + ' ' + to_file) != 0:
-                        raise Exception('Command vips did not work!')
-                except:
-                    os.system('opj_decompress -i ' + from_file + ' -o ' + to_file)
-                    print("Command opj_decompress does not work")   
-        title = request.form.get('title')
-        zip_path = os.path.join(basedir, 'batch/'+title+'.zip')
-        zipf = zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED)
-        path = os.path.join(basedir, 'tmp/converted/')
-        for root, dirs, files in os.walk(path):
-            for file in files:
-                zipf.write( os.path.join(root, file),
-                            os.path.relpath(os.path.join(root, file), path))
+                    cmd = '/usr/bin/time -f %M:%e vips copy ' + from_file + ' ' + to_file + ' 2>&1 >/dev/null'
+                    out = check_output(cmd, shell=True)
+                    resources = out.decode("utf-8")
+                    print(type(out), file=sys.stderr)
+                    new_image = Image(name=filename, exit_code=0, command='vips', batch_id=current_batch_id, resources=resources, imsize=jp2_size)
+                    try:
+                        db.session.add(new_image)
+                        db.session.commit()
+                    except:
+                        return 'Error during db insertion (Image table, line 96)', 500
+                except CalledProcessError as e:
+                    try:
+                        cmd = '/usr/bin/time -f %M:%e opj_decompress -i ' + from_file + ' -o ' + to_file + ' 2>&1 >/dev/null'
+                        out = check_output(cmd, shell=True)
+                        resources = out.decode("utf-8")
+                        new_image = Image(name=filename, exit_code=1, command='openjpeg', resources=resources, batch_id=current_batch_id, imsize=jp2_size)
+                        try:
+                            db.session.add(new_image)
+                            db.session.commit()
+                        except:
+                            return 'Error during db insertion (Image table, line 106)', 500
+                    except:
+                        # both commands did not work, insert batch and image to database as failed
+                        # insert image:
+                        new_image = Image(name=filename, exit_code=2, batch_id=current_batch_id)
+                        try:
+                            db.session.add(new_image)
+                            db.session.commit()
+                        except:
+                            return 'Error during db insertion (Image table, line 115)', 500
+                        # change batch to failed state
+                path = os.path.join(basedir, 'tmp/converted/')
+                zipf.write(to_file)
+                os.remove(from_file)
+                os.remove(to_file)  
         zipf.close()
-        for file in os.listdir(app.config['UPLOADED_PATH']):
-            os.remove(app.config['UPLOADED_PATH'] + file)
-        for file in os.listdir(app.config['CONVERTED_PATH']):
-            os.remove(app.config['CONVERTED_PATH'] + file)  
-        filenames = os.listdir('batch/')
-        zip_name = title + '.zip'
-        new_zip = Batch(name=zip_name, path=zip_path)
+        # add successfull zip to database as batch
+        current_batch = Batch.query.get_or_404(current_batch_id)
         try:
-            db.session.add(new_zip)
+            current_batch.state = 'exists'
             db.session.commit()
-            archives = Batch.query.order_by(Batch.date_created).all()
-            return render_template('index.html', files=archives)
+            return redirect('/')
         except:
-            return 'Error during db insertion', 500
+            return 'There was a problem with changing state from \'waiting\' to \'exists\''
     else:
         return '', 204
 
@@ -104,13 +136,29 @@ def log(filename):
         as_attachment=True
     )
 
+@app.route('/batch_records', methods=['GET'])
+def batch_records():
+    page = request.args.get('page', 1, type=int)
+    batches = Batch.query.order_by(db.desc(Batch.id)).paginate(page=page, per_page=ROWS_PER_PAGE)
+    return render_template('batch_records.html', archives=batches)
+
+@app.route('/image_records', methods=['GET'])
+def image_records():
+    page = request.args.get('page', 1, type=int)
+    images = Image.query.order_by(db.desc(Image.id)).paginate(page=page, per_page=ROWS_PER_PAGE)
+    return render_template('image_records.html', images=images)
+
 @app.route('/delete/<int:id>', methods=['GET', 'POST'])
-def log2(filename):
-    return send_from_directory(
-        os.path.abspath('tmp2'),
-        filename,
-        as_attachment=True
-    )
+def delete_batch(id):
+    batch_to_delete = Batch.query.get_or_404(id)
+    try:
+        if os.path.isfile(batch_to_delete.path):
+            os.remove(batch_to_delete.path)
+        batch_to_delete.state = 'removed'
+        db.session.commit()
+        return redirect('/')
+    except:
+        return 'There was a problem deleting the file'
 
 
 
