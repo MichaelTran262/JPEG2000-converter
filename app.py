@@ -1,11 +1,13 @@
+from distutils import archive_util
 import sys
 import os
 import zipfile
 
 from subprocess import check_output, CalledProcessError, STDOUT
-from flask import Flask, request, render_template, send_from_directory, redirect
+from flask import Flask, request, render_template, send_from_directory, redirect, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
+from dataclasses import dataclass
 
 
 basedir = os.path.abspath(os.path.dirname(__file__))
@@ -20,13 +22,19 @@ db = SQLAlchemy(app)
 
 ROWS_PER_PAGE = 8
 
-
+@dataclass
 class Batch(db.Model):
+    id: int
+    name: str
+    path: str
+    date_created: str
+    state: str
+
     __tablename__ = "batch"
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(64), nullable=False)
     path = db.Column(db.String(64), nullable=True)
-    date_created = db.Column(db.DateTime, default=datetime.utcnow)
+    date_created = db.Column(db.DateTime, default=datetime.now)
     state = db.Column('state', db.Enum('waiting', 'exists', 'removed', 'failed', name='state'), nullable=False)
     children = db.relationship("Image")
 
@@ -40,17 +48,21 @@ class Image(db.Model):
     command = db.Column('command', db.Enum('vips', 'openjpeg', name='command'), nullable=True)
     batch_id = db.Column(db.Integer, db.ForeignKey('batch.id'))
     
-    
 @app.route('/', methods=['POST', 'GET'])
 def index():
-    if request.method == 'POST':
-        page = request.args.get('page', 1, type=int)
-        archives = Batch.query.order_by(db.desc(Batch.date_created)).filter((Batch.state == 'exists') | (Batch.state == 'waiting')).paginate(page=page, per_page=ROWS_PER_PAGE)
-        return render_template('index.html', archives=archives)
-    else:    
-        page = request.args.get('page', 1, type=int)
-        archives = Batch.query.order_by(db.desc(Batch.date_created)).filter((Batch.state == 'exists') | (Batch.state == 'waiting')).paginate(page=page, per_page=ROWS_PER_PAGE)
-        return render_template('index.html', archives=archives)
+    return redirect('/home')
+    
+@app.route('/home', methods=['POST', 'GET'])
+def home():
+    page = request.args.get('page', 1, type=int)
+    archives = Batch.query.order_by(db.desc(Batch.date_created)).filter((Batch.state == 'exists') | (Batch.state == 'waiting')).paginate(page=page, per_page=ROWS_PER_PAGE)
+    return render_template('index.html', archives=archives)
+
+@app.route("/api/home")
+def result_json():
+    page = request.args.get('page', 1, type=int)
+    archives = Batch.query.order_by(db.desc(Batch.date_created)).filter((Batch.state == 'exists') | (Batch.state == 'waiting')).paginate(page=1, per_page=ROWS_PER_PAGE).items
+    return jsonify(archives)
 
 
 @app.route('/upload', methods=['POST'])

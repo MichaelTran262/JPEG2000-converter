@@ -46,6 +46,25 @@
                     var wrapperThis = this;
     
                     submitButton.addEventListener("click", function () {
+                        jQuery.ajax({
+                            url: '/api/home',
+			                type: 'GET',
+			                contentType: 'application/json; charset=utf-8',
+			                dataType: 'json',
+			                async: true,
+                            success: function (data) {
+                                console.log("api/home")
+                                $('#archive_content').empty()
+                                for (var i = 0; i < data.length; i++)
+                                {
+                                    var row = "";
+                                    row += '<td>' + data[i].name + '</td>';
+                                    row += '<td>hello</td>';
+                                    row += '<td>' + data[i].date_created + '</td>';
+                                    $('#archive_content').append('<tr>' + row + '</tr>');
+                                }
+                            }
+                        });
                         wrapperThis.processQueue();
                     });
     
@@ -91,7 +110,7 @@
                     <th class="border-left" scope="col">Čas vytvoření</th>
                 </tr>
                 </thead>
-                <tbody>
+                <tbody id="archive_content">
                 {% for archive in archives.items %}
                     <tr>
                         <td>
@@ -124,7 +143,7 @@
                 </tbody>
             </table>
             <div class="text-right">
-                <a href="{{ url_for('index', page=archives.prev_num) }}" class="btn btn-outline-dark {% if archives.page == 1 %}disabled{% endif %}">
+                <a href="{{ url_for('home', page=archives.prev_num) }}" class="btn btn-outline-dark {% if archives.page == 1 %}disabled{% endif %}">
                     &laquo;
                 </a>
                 <!-- Loop through the number of pages to display a link for each-->
@@ -133,12 +152,12 @@
                 {% if page_num %}
                  <!-- Check for the active page and set the link to "Active"-->
                         {% if archives.page == page_num %}
-                        <a href="{{ url_for('index', page=page_num) }}"
+                        <a href="{{ url_for('home', page=page_num) }}"
                         class="btn btn-dark">
                             {{ page_num }}
                         </a>
                         {% else %}
-                        <a href="{{ url_for('index', page=page_num) }}"
+                        <a href="{{ url_for('home', page=page_num) }}"
                         class="btn btn-outline-dark">
                             {{ page_num }}
                         </a>
@@ -147,7 +166,7 @@
                         ...
                     {% endif %}
                 {% endfor %}    
-                <a href="{{ url_for('index', page=archives.next_num) }}" class="btn btn-outline-dark {% if archives.page == archives.pages %}disabled{% endif %}">
+                <a href="{{ url_for('home', page=archives.next_num) }}" class="btn btn-outline-dark {% if archives.page == archives.pages %}disabled{% endif %}">
                     &raquo;
                 </a>
               </div>
