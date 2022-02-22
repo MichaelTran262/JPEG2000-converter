@@ -4,7 +4,7 @@ import os
 import zipfile
 
 from subprocess import check_output, CalledProcessError, STDOUT
-from flask import Flask, request, render_template, send_from_directory, redirect, jsonify
+from flask import Flask, request, render_template, send_from_directory, redirect, jsonify, json
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 from dataclasses import dataclass
@@ -58,33 +58,43 @@ def home():
     archives = Batch.query.order_by(db.desc(Batch.date_created)).filter((Batch.state == 'exists') | (Batch.state == 'waiting')).paginate(page=page, per_page=ROWS_PER_PAGE)
     return render_template('index.html', archives=archives)
 
-@app.route("/api/home")
-def result_json():
+@app.route("/api/table", methods=['GET', 'POST'])
+def table():
     page = request.args.get('page', 1, type=int)
     archives = Batch.query.order_by(db.desc(Batch.date_created)).filter((Batch.state == 'exists') | (Batch.state == 'waiting')).paginate(page=1, per_page=ROWS_PER_PAGE).items
     return jsonify(archives)
 
-
-@app.route('/upload', methods=['POST'])
-def handle_upload():
+# adds batch to database wit id
+@app.route("/add_batch", methods=['GET', 'POST'])
+def result_json():
     if request.method == 'POST':
         #check if archive name exists
-        title = request.form.get('title')
-        zip_name = title+'.zip'
+        recv_data = request.json
+        zip_name = str(recv_data['title'])+'.zip'
         exists = Batch.query.filter((Batch.name==zip_name) & (Batch.state=='exists')).scalar()
         if exists:
             return 'Tento název už existuje!', 500
         zip_path = os.path.join(basedir, 'batch/'+zip_name)
         new_zip = Batch(name=zip_name, path=zip_path, state='waiting')
-        zipf = zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED)
         try:
             db.session.add(new_zip)
             db.session.flush()
-            current_batch_id = new_zip.id
             db.session.commit()
         except:
             return 'Error during db insertion', 500
-        # get files from dropzone and convert them to tif/png
+    page = request.args.get('page', 1, type=int)
+    archives = Batch.query.order_by(db.desc(Batch.date_created)).filter((Batch.state == 'exists') | (Batch.state == 'waiting')).paginate(page=1, per_page=ROWS_PER_PAGE).items
+    return jsonify(archives)
+
+
+@app.route('/upload', methods=['POST', 'GET'])
+def handle_upload():
+    if request.method == 'POST':
+        title = request.form.get('title')
+        zip_name = title+'.zip'
+        searched = Batch.query.filter((Batch.name==zip_name) & (Batch.state=='waiting')).scalar()
+        print(searched, file=sys.stderr)
+        zipf = zipfile.ZipFile(searched.path, 'w', zipfile.ZIP_DEFLATED)
         for key, f in request.files.items():
             if key.startswith('file'):
                 f.save(os.path.join(app.config['UPLOADED_PATH'], f.filename))
@@ -96,19 +106,19 @@ def handle_upload():
                     cmd = '/usr/bin/time -f %M:%e vips copy ' + from_file + ' ' + to_file + ' 2>&1 >/dev/null'
                     out = check_output(cmd, shell=True)
                     resources = out.decode("utf-8")
-                    print(type(out), file=sys.stderr)
-                    new_image = Image(name=filename, exit_code=0, command='vips', batch_id=current_batch_id, resources=resources, imsize=jp2_size)
+                    new_image = Image(name=filename, exit_code=0, command='vips', batch_id=searched.id, resources=resources, imsize=jp2_size)
                     try:
                         db.session.add(new_image)
                         db.session.commit()
                     except:
                         return 'Error during db insertion (Image table, line 96)', 500
                 except CalledProcessError as e:
+                    print(e.returncode, e.output)
                     try:
                         cmd = '/usr/bin/time -f %M:%e opj_decompress -i ' + from_file + ' -o ' + to_file + ' 2>&1 >/dev/null'
                         out = check_output(cmd, shell=True)
                         resources = out.decode("utf-8")
-                        new_image = Image(name=filename, exit_code=1, command='openjpeg', resources=resources, batch_id=current_batch_id, imsize=jp2_size)
+                        new_image = Image(name=filename, exit_code=1, command='openjpeg', resources=resources, batch_id=searched.id, imsize=jp2_size)
                         try:
                             db.session.add(new_image)
                             db.session.commit()
@@ -117,7 +127,7 @@ def handle_upload():
                     except:
                         # both commands did not work, insert batch and image to database as failed
                         # insert image:
-                        new_image = Image(name=filename, exit_code=2, batch_id=current_batch_id)
+                        new_image = Image(name=filename, exit_code=2, batch_id=searched.id)
                         try:
                             db.session.add(new_image)
                             db.session.commit()
@@ -130,7 +140,7 @@ def handle_upload():
                 os.remove(to_file)  
         zipf.close()
         # add successfull zip to database as batch
-        current_batch = Batch.query.get_or_404(current_batch_id)
+        current_batch = Batch.query.get_or_404(searched.id)
         try:
             current_batch.state = 'exists'
             db.session.commit()
