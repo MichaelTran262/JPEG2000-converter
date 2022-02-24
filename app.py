@@ -48,7 +48,7 @@ class Image(db.Model):
     command = db.Column('command', db.Enum('vips', 'openjpeg', name='command'), nullable=True)
     batch_id = db.Column(db.Integer, db.ForeignKey('batch.id'))
     
-@app.route('/', methods=['POST', 'GET'])
+@app.route('/', methods=['GET'])
 def index():
     return redirect('/home')
     
@@ -62,6 +62,8 @@ def home():
 def table():
     page = request.args.get('page', 1, type=int)
     archives = Batch.query.order_by(db.desc(Batch.date_created)).filter((Batch.state == 'exists') | (Batch.state == 'waiting')).paginate(page=1, per_page=ROWS_PER_PAGE).items
+    for archive in archives:
+        archive.date_created = archive.date_created.strftime('%d.%m.%Y, %H:%M')
     return jsonify(archives)
 
 # adds batch to database wit id
@@ -84,6 +86,8 @@ def result_json():
             return 'Error during db insertion', 500
     page = request.args.get('page', 1, type=int)
     archives = Batch.query.order_by(db.desc(Batch.date_created)).filter((Batch.state == 'exists') | (Batch.state == 'waiting')).paginate(page=1, per_page=ROWS_PER_PAGE).items
+    for archive in archives:
+        archive.date_created = archive.date_created.strftime('%d.%m.%Y, %H:%M')
     return jsonify(archives)
 
 
@@ -91,6 +95,8 @@ def result_json():
 def handle_upload():
     if request.method == 'POST':
         title = request.form.get('title')
+        format = request.form.get('format')
+        program = request.form.get('program')
         zip_name = title+'.zip'
         searched = Batch.query.filter((Batch.name==zip_name) & (Batch.state=='waiting')).scalar()
         print(searched, file=sys.stderr)
@@ -102,40 +108,61 @@ def handle_upload():
                 jp2_size = os.path.getsize(from_file)/1000000
                 filename = os.path.splitext(f.filename)[0]
                 to_file = os.path.join(basedir, 'tmp') + '/converted/' + filename + '.tif'
-                try:
-                    cmd = '/usr/bin/time -f %M:%e vips copy ' + from_file + ' ' + to_file + ' 2>&1 >/dev/null'
-                    out = check_output(cmd, shell=True)
-                    resources = out.decode("utf-8")
-                    new_image = Image(name=filename, exit_code=0, command='vips', batch_id=searched.id, resources=resources, imsize=jp2_size)
+                if program == "libvips":
                     try:
-                        db.session.add(new_image)
-                        db.session.commit()
-                    except:
-                        return 'Error during db insertion (Image table, line 96)', 500
-                except CalledProcessError as e:
-                    print(e.returncode, e.output)
+                        cmd = '/usr/bin/time -f %M:%e vips copy ' + from_file + ' ' + to_file + ' 2>&1 >/dev/null'
+                        out = check_output(cmd, shell=True)
+                        resources = out.decode("utf-8")
+                        new_image = Image(name=filename, exit_code=0, command='vips', batch_id=searched.id, resources=resources, imsize=jp2_size)
+                        try:
+                            db.session.add(new_image)
+                            db.session.commit()
+                        except:
+                            return 'Error during db insertion (Image table, line 96)', 500
+                    except CalledProcessError as e:
+                        print(e.returncode, e.output)
+                        try:
+                            cmd = '/usr/bin/time -f %M:%e opj_decompress -i ' + from_file + ' -o ' + to_file + ' 2>&1 >/dev/null'
+                            out = check_output(cmd, shell=True)
+                            resources = out.decode("utf-8")
+                            new_image = Image(name=filename, exit_code=1, command='openjpeg', resources=resources, batch_id=searched.id, imsize=jp2_size)
+                            try:
+                                db.session.add(new_image)
+                                db.session.commit()
+                            except:
+                                return 'Error during db insertion (Image table, line 106)', 500
+                        except:
+                            # both commands did not work, insert batch and image to database as failed
+                            # insert image:
+                            new_image = Image(name=filename, exit_code=2, batch_id=searched.id)
+                            try:
+                                db.session.add(new_image)
+                                db.session.commit()
+                            except:
+                                return 'Error during db insertion (Image table, line 115)', 500
+                            # change batch to failed state
+                elif program == "openjpeg":
                     try:
                         cmd = '/usr/bin/time -f %M:%e opj_decompress -i ' + from_file + ' -o ' + to_file + ' 2>&1 >/dev/null'
                         out = check_output(cmd, shell=True)
                         resources = out.decode("utf-8")
-                        new_image = Image(name=filename, exit_code=1, command='openjpeg', resources=resources, batch_id=searched.id, imsize=jp2_size)
+                        new_image = Image(name=filename, exit_code=0, command='openjpeg', resources=resources, batch_id=searched.id, imsize=jp2_size)
                         try:
                             db.session.add(new_image)
                             db.session.commit()
                         except:
                             return 'Error during db insertion (Image table, line 106)', 500
                     except:
-                        # both commands did not work, insert batch and image to database as failed
-                        # insert image:
-                        new_image = Image(name=filename, exit_code=2, batch_id=searched.id)
+                        # opj_decompress did not work, insert batch and image to database as failed
+                        new_image = Image(name=filename, exit_code=4, batch_id=searched.id)
                         try:
                             db.session.add(new_image)
                             db.session.commit()
                         except:
                             return 'Error during db insertion (Image table, line 115)', 500
                         # change batch to failed state
-                path = os.path.join(basedir, 'tmp/converted/')
-                zipf.write(to_file)
+                to_filename = to_file.split('/')[-1]
+                zipf.write(to_file, to_filename)
                 os.remove(from_file)
                 os.remove(to_file)  
         zipf.close()

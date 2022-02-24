@@ -24,11 +24,12 @@
     <script src="https://unpkg.com/dropzone@5/dist/min/dropzone.min.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/dropzone@5/dist/min/dropzone.min.css" type="text/css" />
 
+    <script src="../static/js/script.js"></script>
     <title>Image converter</title>
 
 </head>
 <body>
-    <nav class="navbar navbar-expand-sm bg-dark navbar-dark">
+    <nav class="navbar navbar-expand-sm navbar-light" style="box-shadow: 1px 1px 5px #cccccc;">
         <!-- Brand/logo -->
         <a class="navbar-brand" href="/home">JPEG2000 konverter</a>
         
@@ -53,5 +54,14 @@
         </div>
     </nav>
      {% block body %}{% endblock %}
+    <footer class="footer" style="box-shadow: 1px 1px 5px #cccccc;">
+        <div class="text-center">© 2022 Copyright:
+                <a href="https://www.mzk.cz/"> mzk.cz</a> <br>
+                <p>V případě chyby nebo bugu napsat pls <a href="mailto:QuangThanh.Tran@mzk.cz">Michalu Tranovi</a>. (QuangThanh.Tran@mzk.cz)</p>
+        </div>
+        <!-- Copyright -->
+
+    </footer>
+
 </body>
 </html>
